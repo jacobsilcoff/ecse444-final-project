@@ -595,23 +595,20 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_filter)
 {
 	// check to make sure correct callback
-	if(hdfsdm_filter == &hdfsdm1_filter0)
-	{
+	if(hdfsdm_filter == &hdfsdm1_filter0) {
 		HAL_DFSDM_FilterRegularStop_DMA(hdfsdm_filter);
 
 		// scale 24 bits to 8 bit channel
-		for(size_t i = 0; i < TONE_LEN; i++)
-		{
+		for(size_t i = 0; i < TONE_LEN; i++) {
 			currentTone[i] = (currentTone[i] >> 8)/65536 + 128;
 		}
 
 		//write microphone to flash
-		if (BSP_QSPI_Write(currentTone, sizeof(currentTone)*NUM_TONES + toneIndex * TONE_LEN, sizeof(currentTone)) != QSPI_OK) {
+		if(BSP_QSPI_Write(currentTone, sizeof(currentTone) * (NUM_TONES + toneIndex), sizeof(currentTone)) != QSPI_OK) {
 			Error_Handler();
 		}
 
-		if(++toneIndex < toneSequenceSize)
-		{
+		if(++toneIndex < toneSequenceSize) {
 			HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
 		}
 	}
