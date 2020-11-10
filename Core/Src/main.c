@@ -60,12 +60,14 @@ UART_HandleTypeDef huart1;
 /* USER CODE BEGIN PV */
 //Constants & Variables associated with tone generation-------
 const int MAX_TONE_AMPLITUDE = 255;
-const float OUTPUT_SAMPLE_RATE = 44100.0;
+const float OUTPUT_SAMPLE_RATE = 9400.0;
 const float TAU = 6.2831853072;
-const int TONE_FREQUENCIES[] = {2093, 2637, 3136, 4186};
+const int TONE_FREQUENCIES[] = {524, 659, 784, 1047};
+//const int TONE_FREQUENCIES[] = {1047, 1319, 1568, 2093};
+//const int TONE_FREQUENCIES[] = {2093, 2637, 3136, 4186};
 const int NUM_TONES = 4;
 const int TONE_LEN = 22500;
-uint32_t tone[22500];
+uint32_t currentTone[22500];
 
 //Variables for sequencing tone------------------------------
 const int MAX_TONE_SEQUENCE_LENGTH = 100;
@@ -137,7 +139,7 @@ int main(void)
 	HAL_TIM_Base_Start(&htim2);
 	BSP_QSPI_Init();
 	//erase flash:
-	int numBlocks = (int)(NUM_TONES*sizeof(tone)/64000.0 + 1);
+	int numBlocks = (int)(NUM_TONES*sizeof(currentTone)/64000.0 + 1);
 	for (int i = 0; i < numBlocks; i++) {
 		if (BSP_QSPI_Erase_Block(65536*i) != QSPI_OK) {
 			Error_Handler();
@@ -151,10 +153,10 @@ int main(void)
 		for (int j = 0; j < TONE_LEN; j++) {
 			float theta = w * j/OUTPUT_SAMPLE_RATE;
 			float s = (1 + arm_sin_f32(theta)) / 2.0;
-			tone[j] = (uint32_t) (2/3.0 * MAX_TONE_AMPLITUDE * s);
+			currentTone[j] = (uint32_t) (2/3.0 * MAX_TONE_AMPLITUDE * s);
 		}
 		//write tone to flash
-		if (BSP_QSPI_Write(tone, i * sizeof(tone), sizeof(tone)) != QSPI_OK) {
+		if (BSP_QSPI_Write(currentTone, i * sizeof(currentTone), sizeof(currentTone)) != QSPI_OK) {
 			Error_Handler();
 		}
 	}
@@ -165,8 +167,6 @@ int main(void)
 	while (1)
 	{
 		/* USER CODE END WHILE */
-		addToneToSequence();
-		playSequenceBlocking();
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
@@ -540,6 +540,15 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == BLUE_BUTTON_Pin) {
+		if (!playingSequence) {
+			addToneToSequence();
+			playSequence();
+		}
+	}
+}
+
 void addToneToSequence(void) {
 	//If we exceed buffer size, pattern resets anew -- unlikely to matter
 	if (toneSequenceSize == MAX_TONE_SEQUENCE_LENGTH) {
@@ -550,7 +559,7 @@ void addToneToSequence(void) {
 }
 
 void loadToneFromFlash(int frequency) {
-	if (BSP_QSPI_Read(tone, sizeof(tone) * frequency, sizeof(tone)) != QSPI_OK) {
+	if (BSP_QSPI_Read(currentTone, sizeof(currentTone) * frequency, sizeof(currentTone)) != QSPI_OK) {
 		Error_Handler();
 	}
 }
@@ -561,16 +570,16 @@ void loadToneFromFlash(int frequency) {
 void playSequence() {
 	playingSequence = 1;
 	toneIndex = 0;
-	loadToneFromFlash(toneIndex);
+	loadToneFromFlash(toneSequence[toneIndex]);
 	HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
-	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, tone, TONE_LEN, DAC_ALIGN_8B_R);
+	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
 }
 
 void playSequenceBlocking() {
 	playingSequence = 1;
 	toneIndex = 0;
-	loadToneFromFlash(toneIndex);
-	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, tone, TONE_LEN, DAC_ALIGN_8B_R);
+	loadToneFromFlash(toneSequence[toneIndex]);
+	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
 	while (playingSequence) {
 		HAL_Delay(100);
 	}
@@ -583,8 +592,8 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 		return;
 	}
 	toneIndex++;
-	loadToneFromFlash(toneIndex);
-	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, tone, TONE_LEN, DAC_ALIGN_8B_R);
+	loadToneFromFlash(toneSequence[toneIndex]);
+	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
 }
 /* USER CODE END 4 */
 
