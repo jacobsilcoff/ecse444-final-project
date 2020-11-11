@@ -644,7 +644,7 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 		}
 
 		//write microphone to flash
-		if (BSP_QSPI_Write(currentTone, sizeof(currentTone)*NUM_TONES + toneIndex * TONE_LEN, sizeof(currentTone)) != QSPI_OK) {
+		if(BSP_QSPI_Write(currentTone, sizeof(currentTone) * (NUM_TONES + toneIndex), sizeof(currentTone)) != QSPI_OK) {
 			Error_Handler();
 		}
 
