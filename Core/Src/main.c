@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "arm_math.h"
 #include <stdlib.h>
+#include <limits.h>
 #include "stm32l475e_iot01_qspi.h"
 /* USER CODE END Includes */
 
@@ -105,6 +106,7 @@ void playSequenceBlocking(void);
 void loadToneFromFlash(int frequency);
 void startRecording();
 int analyzeNote(int noteIndex);
+char checkAnswer();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -555,21 +557,18 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == BLUE_BUTTON_Pin) {
-//		if (doneRecording) {
-//			analyzeNote(0);
-//		}
-//		if (!playingSequence) {
-//			addToneToSequence();
-//			playSequence();
-//			startRecording();
-//		}
-		addToneToSequence();
-		if (doneRecording) {
-			analyzeNote(0);
-			doneRecording = 0;
-		} else {
-			startRecording();
-		}
+
+	}
+}
+
+void runFrequencyAnalysisTest() {
+	//loop this to test out tone analysis
+	addToneToSequence();
+	if (doneRecording) {
+		analyzeNote(0);
+		doneRecording = 0;
+	} else {
+		startRecording();
 	}
 }
 
@@ -597,13 +596,12 @@ void playSequence() {
 	loadToneFromFlash(toneSequence[toneIndex]);
 	HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
 	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
+	//Turn on LED to start
+	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 }
 
 void playSequenceBlocking() {
-	playingSequence = 1;
-	toneIndex = 0;
-	loadToneFromFlash(toneSequence[toneIndex]);
-	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
+	playSequence();
 	while (playingSequence) {
 		HAL_Delay(100);
 	}
@@ -611,8 +609,12 @@ void playSequenceBlocking() {
 
 //DAC callback
 void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
+	//toggles LED to help time
+	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 	HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
 	if (toneIndex >= toneSequenceSize) {
+		//Turn off LED when done playing
+		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 		doneRecording = 0;
 		playingSequence = 0;
 		toneIndex = 0;
@@ -626,6 +628,8 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 void startRecording() {
 	doneRecording = 0;
 	HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
+	//Turn on LED to start
+	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 }
 
 // callback for timer
@@ -645,9 +649,11 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 		}
 
 		if(++toneIndex < toneSequenceSize) {
+			HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 			HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
 		} else {
 			doneRecording = 1;
+			HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 		}
 	}
 }
@@ -666,31 +672,10 @@ int analyzeNote(int noteIndex) {
 	//Call FFT (assumes currentTone buffer already formatted in q31 format)
 	arm_rfft_q31(&fftInstance, &currentTone[TONE_LEN/4], fftOutputBuffer);
 
-	//Apply shift as dictated (not sure if necessary?)
-//	for (int i = 0; i < TONE_LEN/2; i++) {
-//		fftOutputBuffer[i] >>= 12;
-//	}
-
 	//Find max values
 	arm_cmplx_mag_q31(fftOutputBuffer, currentTone, TONE_LEN/2);
 
-	//Approach #1: Check a window around each tone
 	const float DELTA_F = OUTPUT_SAMPLE_RATE / (TONE_LEN / 2);
-	unsigned long maxSum = 0;
-	int maxTone = 0;
-	for (int t = 0; t < NUM_TONES; t++) {
-		int freqIndex = (int)(TONE_FREQUENCIES[t] / DELTA_F);
-		unsigned long sum = 0;
-		for (int i = 0; i < WINDOW_SIZE; i++) {
-			sum += currentTone[freqIndex - (WINDOW_SIZE / 2) + i];
-		}
-		if (sum > maxSum) {
-			maxSum = sum;
-			maxTone = t;
-		}
-	}
-
-	//Approach #2: Find the window with the most power
 	int maxCenterFreq = 0;
 	int maxWindowSum = 0;
 	unsigned long currentSum = 0;
@@ -732,6 +717,39 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE END Callback 1 */
 }
 
+char checkAnswer() {
+	int maxValues[NUM_TONES];
+	int minValues[NUM_TONES];
+	char includedTones = 0x0;
+	for (int i = 0; i < NUM_TONES; i++) {
+		maxValues[i] = 0;
+		minValues[i] = INT_MAX;
+	}
+	for (int i = 0; i < toneSequenceSize; i++) {
+		int tone = toneSequence[i];
+		int freq = analyzeNote(i);
+		if (freq > maxValues[tone]) {
+			maxValues[tone] = freq;
+		}
+		if (freq < minValues[tone]) {
+			minValues[tone] = freq;
+		}
+		includedTones |= 1 << tone;
+	}
+
+	//Checks tone ranges are reasonable
+	for (int i = 0; i < NUM_TONES; i++) {
+		//Don't need to compare tones not involved in sequence
+		if (!(includedTones & (1 << i))) continue;
+		for (int j = i + 1; j < NUM_TONES; j++) {
+			if ((includedTones & (1 << j)) && maxValues[i] > minValues[j]) {
+				return 1;
+			}
+		}
+	}
+	return 1;
+
+}
 /**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
