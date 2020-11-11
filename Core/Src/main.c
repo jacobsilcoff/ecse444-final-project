@@ -743,11 +743,11 @@ char checkAnswer() {
 		if (!(includedTones & (1 << i))) continue;
 		for (int j = i + 1; j < NUM_TONES; j++) {
 			if ((includedTones & (1 << j)) && maxValues[i] > minValues[j]) {
-				return 1;
+				return 0; // failure :(
 			}
 		}
 	}
-	return 1;
+	return 1; // success :)
 
 }
 /**
