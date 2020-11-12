@@ -25,6 +25,7 @@
 #include "arm_math.h"
 #include <stdlib.h>
 #include <limits.h>
+#include <string.h>
 #include "stm32l475e_iot01_qspi.h"
 /* USER CODE END Includes */
 
@@ -87,6 +88,10 @@ const int WINDOW_SIZE = 50;
 char playingSequence = 0;
 char doneRecording = 0;
 
+//Other constants --------------------------------------------
+const int UART_TIMEOUT_MS = 100;
+const int UART_RETRIES = 3;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -107,6 +112,7 @@ void loadToneFromFlash(int frequency);
 void startRecording();
 int analyzeNote(int noteIndex);
 char checkAnswer();
+void transmitToUart(char * buffer);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -150,6 +156,7 @@ int main(void)
   MX_QUADSPI_Init();
   MX_DFSDM1_Init();
   /* USER CODE BEGIN 2 */
+    HAL_UART_Init(&huart1);
 	HAL_TIM_Base_Start(&htim2);
 	BSP_QSPI_Init();
 	//erase flash:
@@ -694,6 +701,48 @@ int analyzeNote(int noteIndex) {
 	}
 	return maxCenterFreq;
 }
+
+char checkAnswer() {
+       int maxValues[NUM_TONES];
+       int minValues[NUM_TONES];
+       char includedTones = 0x0;
+       for (int i = 0; i < NUM_TONES; i++) {
+               maxValues[i] = 0;
+               minValues[i] = INT_MAX;
+       }
+       for (int i = 0; i < toneSequenceSize; i++) {
+               int tone = toneSequence[i];
+               int freq = analyzeNote(i);
+               if (freq > maxValues[tone]) {
+                       maxValues[tone] = freq;
+               }
+               if (freq < minValues[tone]) {
+                       minValues[tone] = freq;
+               }
+               includedTones |= 1 << tone;
+       }
+
+       //Checks tone ranges are reasonable
+       for (int i = 0; i < NUM_TONES; i++) {
+               //Don't need to compare tones not involved in sequence
+               if (!(includedTones & (1 << i))) continue;
+               for (int j = i + 1; j < NUM_TONES; j++) {
+                       if ((includedTones & (1 << j)) && maxValues[i] > minValues[j]) {
+                               return 0; // failure :(
+                       }
+               }
+       }
+       return 1; // success :)
+
+}
+
+void transmitToUart(char * buffer) {
+	for(int i = 0; i < UART_RETRIES; i++) {
+		if(HAL_OK == HAL_UART_Transmit(&huart1, buffer, strlen(buffer) + 1, UART_TIMEOUT_MS)) {
+			break;
+		}
+	}
+}
 /* USER CODE END 4 */
 
 /**
@@ -717,39 +766,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE END Callback 1 */
 }
 
-char checkAnswer() {
-	int maxValues[NUM_TONES];
-	int minValues[NUM_TONES];
-	char includedTones = 0x0;
-	for (int i = 0; i < NUM_TONES; i++) {
-		maxValues[i] = 0;
-		minValues[i] = INT_MAX;
-	}
-	for (int i = 0; i < toneSequenceSize; i++) {
-		int tone = toneSequence[i];
-		int freq = analyzeNote(i);
-		if (freq > maxValues[tone]) {
-			maxValues[tone] = freq;
-		}
-		if (freq < minValues[tone]) {
-			minValues[tone] = freq;
-		}
-		includedTones |= 1 << tone;
-	}
-
-	//Checks tone ranges are reasonable
-	for (int i = 0; i < NUM_TONES; i++) {
-		//Don't need to compare tones not involved in sequence
-		if (!(includedTones & (1 << i))) continue;
-		for (int j = i + 1; j < NUM_TONES; j++) {
-			if ((includedTones & (1 << j)) && maxValues[i] > minValues[j]) {
-				return 0; // failure :(
-			}
-		}
-	}
-	return 1; // success :)
-
-}
 /**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
