@@ -637,8 +637,6 @@ void printSequence() {
 void playSequence() {
 	printSequence();
 	gameState = PLAYING_TONE;
-	//Begin by clearing flash that will later be used for mic recording
-	//This is done here to reduce latency when the user starts recording
 	int numBlocks = (int)(toneSequenceSize*sizeof(currentTone)/(float)BLOCK_SIZE  + 1);
 	for (int i = 0; i < numBlocks; i++) {
 		if (BSP_QSPI_Erase_Block(REC_START + BLOCK_SIZE*i) != QSPI_OK) {
