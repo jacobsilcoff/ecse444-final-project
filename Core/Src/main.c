@@ -85,8 +85,6 @@ uint32_t fftOutputBuffer[8192];
 const int WINDOW_SIZE = 50;
 
 //Flags for state --------------------------------------------
-char playingSequence = 0;
-char doneRecording = 0;
 enum GAME_STATE {
 	READY_TO_PLAY_TONE = 0,
 	PLAYING_TONE,
@@ -595,17 +593,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 }
 
-void runFrequencyAnalysisTest() {
-	//loop this to test out tone analysis
-	addToneToSequence();
-	if (doneRecording) {
-		analyzeNote(0);
-		doneRecording = 0;
-	} else {
-		startRecording();
-	}
-}
-
 void addToneToSequence(void) {
 	//If we exceed buffer size, pattern resets anew -- unlikely to matter
 	if (toneSequenceSize == MAX_TONE_SEQUENCE_LENGTH) {
@@ -626,7 +613,6 @@ void loadToneFromFlash(int frequency) {
  */
 void playSequence() {
 	gameState = PLAYING_TONE;
-	playingSequence = 1;
 	toneIndex = 0;
 	loadToneFromFlash(toneSequence[toneIndex]);
 	HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
@@ -643,8 +629,6 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 	if (toneIndex >= toneSequenceSize) {
 		//Turn off LED when done playing
 		HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
-		doneRecording = 0;
-		playingSequence = 0;
 		toneIndex = 0;
 		gameState = READY_TO_RECORD;
 		return;
@@ -655,7 +639,6 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 }
 
 void startRecording() {
-	doneRecording = 0;
 	gameState = RECORDING;
 	HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
 	//Turn on LED to start
@@ -689,7 +672,6 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 			HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
 			HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
 		} else {
-			doneRecording = 1;
 			char won = checkAnswer();
 			if (won) {
 				gameState = READY_TO_PLAY_TONE;
