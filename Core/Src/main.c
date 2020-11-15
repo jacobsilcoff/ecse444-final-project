@@ -66,6 +66,8 @@ const int MAX_TONE_AMPLITUDE = 255;
 const float OUTPUT_SAMPLE_RATE = 9400.0;
 const float TAU = 6.2831853072;
 const int TONE_FREQUENCIES[] = {524, 659, 784, 1047};
+const int BLOCK_SIZE = 65536;
+int REC_START;
 //const int TONE_FREQUENCIES[] = {1047, 1319, 1568, 2093};
 //const int TONE_FREQUENCIES[] = {2093, 2637, 3136, 4186};
 const int NUM_TONES = 4;
@@ -84,6 +86,8 @@ int toneIndex = 0;
 arm_rfft_instance_q31 fftInstance;
 uint32_t fftOutputBuffer[8192];
 const int WINDOW_SIZE = 50;
+const int MIN_FREQ = 150;
+const int MAX_FREQ = 5000;
 
 //Flags for state --------------------------------------------
 enum GAME_STATE {
@@ -170,12 +174,13 @@ int main(void)
 	BSP_QSPI_Init();
 	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
 	//erase flash:
-	int numBlocks = (int)(NUM_TONES*sizeof(currentTone)/64000.0 + 1);
+	int numBlocks = (int)(NUM_TONES*sizeof(currentTone)/(float)BLOCK_SIZE + 1);
 	for (int i = 0; i < numBlocks; i++) {
-		if (BSP_QSPI_Erase_Block(65536*i) != QSPI_OK) {
+		if (BSP_QSPI_Erase_Block(BLOCK_SIZE*i) != QSPI_OK) {
 			Error_Handler();
 		}
 	}
+	REC_START = BLOCK_SIZE * (numBlocks + 1);
 
 	//program flash:
 	for (int i = NUM_TONES-1; i >= 0; i--) {
@@ -633,6 +638,12 @@ void printSequence() {
 void playSequence() {
 	printSequence();
 	gameState = PLAYING_TONE;
+	int numBlocks = (int)(toneSequenceSize*sizeof(currentTone)/(float)BLOCK_SIZE  + 1);
+	for (int i = 0; i < numBlocks; i++) {
+		if (BSP_QSPI_Erase_Block(REC_START + BLOCK_SIZE*i) != QSPI_OK) {
+			Error_Handler();
+		}
+	}
 	toneIndex = 0;
 	loadToneFromFlash(toneSequence[toneIndex]);
 	HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
@@ -688,7 +699,7 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 		}
 
 		//write microphone to flash
-		if(BSP_QSPI_Write(currentTone, sizeof(currentTone) * (NUM_TONES + toneIndex), sizeof(currentTone)) != QSPI_OK) {
+		if(BSP_QSPI_Write(currentTone, sizeof(currentTone) * toneIndex + REC_START, sizeof(currentTone)) != QSPI_OK) {
 			Error_Handler();
 		}
 
@@ -709,7 +720,7 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 
 int analyzeNote(int noteIndex) {
 	//Load note from flash
-	if (BSP_QSPI_Read(currentTone, sizeof(currentTone)*NUM_TONES + noteIndex * TONE_LEN, sizeof(currentTone)) != QSPI_OK) {
+	if (BSP_QSPI_Read(currentTone, REC_START + noteIndex*sizeof(currentTone), sizeof(currentTone)) != QSPI_OK) {
 		Error_Handler();
 	}
 
@@ -735,7 +746,7 @@ int analyzeNote(int noteIndex) {
 		if (i + WINDOW_SIZE/2 < TONE_LEN / 2) {
 			currentSum += currentTone[i + WINDOW_SIZE / 2];
 		}
-		if (currentSum > maxWindowSum) {
+		if (currentSum > maxWindowSum && i*DELTA_F > MIN_FREQ && i*DELTA_F < MAX_FREQ) {
 			maxWindowSum = currentSum;
 			maxCenterFreq = (int)(i * DELTA_F) ;
 		}
