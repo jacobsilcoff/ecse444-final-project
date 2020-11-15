@@ -87,6 +87,15 @@ const int WINDOW_SIZE = 50;
 //Flags for state --------------------------------------------
 char playingSequence = 0;
 char doneRecording = 0;
+enum GAME_STATE {
+	READY_TO_PLAY_TONE = 0,
+	PLAYING_TONE,
+	READY_TO_RECORD,
+	RECORDING,
+	LOST
+};
+
+enum GAME_STATE gameState = READY_TO_PLAY_TONE;
 
 //Other constants --------------------------------------------
 const int UART_TIMEOUT_MS = 100;
@@ -113,6 +122,7 @@ void startRecording();
 int analyzeNote(int noteIndex);
 char checkAnswer();
 void transmitToUart(char * buffer);
+void lose(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -573,9 +583,17 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	if (GPIO_Pin == BLUE_BUTTON_Pin) {
-
+	if (GPIO_Pin != BLUE_BUTTON_Pin) {
+		return;
 	}
+	if (gameState == READY_TO_PLAY_TONE || gameState == LOST) {
+		HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
+		addToneToSequence();
+		playSequence();
+	} else if (gameState == READY_TO_RECORD) {
+		startRecording();
+	}
+
 }
 
 void runFrequencyAnalysisTest() {
@@ -608,6 +626,7 @@ void loadToneFromFlash(int frequency) {
  * non-blocking function that plays the sequence to the user
  */
 void playSequence() {
+	gameState = PLAYING_TONE;
 	playingSequence = 1;
 	toneIndex = 0;
 	loadToneFromFlash(toneSequence[toneIndex]);
@@ -635,6 +654,7 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 		doneRecording = 0;
 		playingSequence = 0;
 		toneIndex = 0;
+		gameState = READY_TO_RECORD;
 		return;
 	}
 	toneIndex++;
@@ -644,12 +664,20 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 
 void startRecording() {
 	doneRecording = 0;
+	gameState = RECORDING;
 	HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
 	//Turn on LED to start
 	HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET);
 }
 
-// callback for timer
+void lose() {
+	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
+	gameState = LOST;
+	toneSequenceSize = 0;
+	toneIndex = 0;
+}
+
+// callback for microphone
 void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_filter) {
 	// check to make sure correct callback
 	if(hdfsdm_filter == &hdfsdm1_filter0) {
@@ -670,6 +698,13 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 			HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
 		} else {
 			doneRecording = 1;
+			char won = checkAnswer();
+			if (won) {
+				gameState = READY_TO_PLAY_TONE;
+			} else {
+				gameState = LOST;
+				lose();
+			}
 			HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
 		}
 	}
