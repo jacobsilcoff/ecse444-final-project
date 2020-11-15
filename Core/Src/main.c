@@ -667,7 +667,10 @@ void startRecording() {
 
 void lose() {
 	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
-	transmitToUart("GAME OVER");
+	transmitToUart("GAME OVER\n");
+	char buf[50];
+	sprintf(buf, "Your score: %d points.\n\n", toneSequenceSize);
+	transmitToUart(buf);
 	gameState = START_GAME;
 	toneSequenceSize = 0;
 	toneIndex = 0;
