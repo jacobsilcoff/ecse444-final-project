@@ -87,6 +87,7 @@ arm_rfft_instance_q31 fftInstance;
 uint32_t fftOutputBuffer[8192];
 const int WINDOW_SIZE = 50;
 const int MIN_FREQ = 150;
+const int MAX_FREQ = 5000;
 
 //Flags for state --------------------------------------------
 enum GAME_STATE {
@@ -745,7 +746,7 @@ int analyzeNote(int noteIndex) {
 		if (i + WINDOW_SIZE/2 < TONE_LEN / 2) {
 			currentSum += currentTone[i + WINDOW_SIZE / 2];
 		}
-		if (currentSum > maxWindowSum && i*DELTA_F > MIN_FREQ) {
+		if (currentSum > maxWindowSum && i*DELTA_F > MIN_FREQ && i*DELTA_F < MAX_FREQ) {
 			maxWindowSum = currentSum;
 			maxCenterFreq = (int)(i * DELTA_F) ;
 		}
