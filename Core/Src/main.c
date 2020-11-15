@@ -91,8 +91,7 @@ enum GAME_STATE {
 	READY_TO_PLAY_TONE = 0,
 	PLAYING_TONE,
 	READY_TO_RECORD,
-	RECORDING,
-	LOST
+	RECORDING
 };
 
 enum GAME_STATE gameState = READY_TO_PLAY_TONE;
@@ -586,7 +585,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin != BLUE_BUTTON_Pin) {
 		return;
 	}
-	if (gameState == READY_TO_PLAY_TONE || gameState == LOST) {
+	if (gameState == READY_TO_PLAY_TONE) {
 		HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
 		addToneToSequence();
 		playSequence();
@@ -636,13 +635,6 @@ void playSequence() {
 	HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET);
 }
 
-void playSequenceBlocking() {
-	playSequence();
-	while (playingSequence) {
-		HAL_Delay(100);
-	}
-}
-
 //DAC callback
 void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 	//toggles LED to help time
@@ -672,7 +664,7 @@ void startRecording() {
 
 void lose() {
 	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
-	gameState = LOST;
+	gameState = READY_TO_PLAY_TONE;
 	toneSequenceSize = 0;
 	toneIndex = 0;
 }
@@ -702,7 +694,6 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 			if (won) {
 				gameState = READY_TO_PLAY_TONE;
 			} else {
-				gameState = LOST;
 				lose();
 			}
 			HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
