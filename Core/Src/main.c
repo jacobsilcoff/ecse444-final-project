@@ -89,7 +89,8 @@ enum GAME_STATE {
 	READY_TO_PLAY_TONE = 0,
 	PLAYING_TONE,
 	READY_TO_RECORD,
-	RECORDING
+	RECORDING,
+	START_GAME
 };
 
 enum GAME_STATE gameState = READY_TO_PLAY_TONE;
@@ -583,8 +584,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin != BLUE_BUTTON_Pin) {
 		return;
 	}
-	if (gameState == READY_TO_PLAY_TONE) {
-		HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
+	if (gameState == READY_TO_PLAY_TONE || gameState == START_GAME) {
+		if (gameState == START_GAME) {
+			HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
+			transmitToUart("STARTING NEW GAME");
+		}
 		addToneToSequence();
 		playSequence();
 	} else if (gameState == READY_TO_RECORD) {
@@ -647,7 +651,8 @@ void startRecording() {
 
 void lose() {
 	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
-	gameState = READY_TO_PLAY_TONE;
+	transmitToUart("GAME OVER");
+	gameState = START_GAME;
 	toneSequenceSize = 0;
 	toneIndex = 0;
 }
