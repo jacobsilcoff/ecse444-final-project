@@ -40,6 +40,9 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+#define FLASH_BLOCK_SIZE 65536
+#define NUM_TONES 4
+
 
 /* USER CODE END PM */
 
@@ -67,7 +70,6 @@ const float TAU = 6.2831853072;
 const int TONE_FREQUENCIES[] = {524, 659, 784, 1047};
 //const int TONE_FREQUENCIES[] = {1047, 1319, 1568, 2093};
 //const int TONE_FREQUENCIES[] = {2093, 2637, 3136, 4186};
-const int NUM_TONES = 4;
 //const int TONE_LEN = 22500;
 //uint32_t currentTone[22500];
 const int TONE_LEN = 8192;
@@ -91,6 +93,8 @@ char doneRecording = 0;
 //Other constants --------------------------------------------
 const int UART_TIMEOUT_MS = 100;
 const int UART_RETRIES = 3;
+const int SCORE_BLOCK = ((NUM_TONES*sizeof(currentTone) - 1)/FLASH_BLOCK_SIZE + 1);
+const int MAX_SCORES = 100;
 
 /* USER CODE END PV */
 
@@ -112,7 +116,33 @@ void loadToneFromFlash(int frequency);
 void startRecording();
 int analyzeNote(int noteIndex);
 char checkAnswer();
+
+/// Transmits all scores through UART
+void printScoreToUart();
+
+/// Transmits message to UART to be displayed on screen of connected device
+///
+/// @param buffer: Pointer to null-terminated string to be sent through UART
 void transmitToUart(char * buffer);
+
+/// Loads scores from Flash Memory
+///
+/// @param scores: Pointer to where to copy scores
+/// @return: Integer representing number of scores stored in Flash
+int loadScoresFromMemory(int * scores);
+
+/// Stores score in Flash Memory
+///
+/// @param score: Score to store in memory
+void storeScoreInMemory(const int score);
+
+/// Formats the Flash Memory for store
+/// Note: Should only use to reset system
+void formatScoreMemory();
+
+/// Clears all scores in Flash Memory
+void clearScoresInMemory();
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -159,10 +189,22 @@ int main(void)
     HAL_UART_Init(&huart1);
 	HAL_TIM_Base_Start(&htim2);
 	BSP_QSPI_Init();
+
+	formatScoreMemory();
+	storeScoreInMemory(20);
+	storeScoreInMemory(30);
+	storeScoreInMemory(40);
+	storeScoreInMemory(60);
+	storeScoreInMemory(70);
+	storeScoreInMemory(10);
+	storeScoreInMemory(15);
+
+	printScoreToUart();
+
 	//erase flash:
-	int numBlocks = (int)(NUM_TONES*sizeof(currentTone)/64000.0 + 1);
+	int numBlocks = ((NUM_TONES*sizeof(currentTone) - 1)/FLASH_BLOCK_SIZE + 1);
 	for (int i = 0; i < numBlocks; i++) {
-		if (BSP_QSPI_Erase_Block(65536*i) != QSPI_OK) {
+		if (BSP_QSPI_Erase_Block(FLASH_BLOCK_SIZE*i) != QSPI_OK) {
 			Error_Handler();
 		}
 	}
@@ -736,6 +778,33 @@ char checkAnswer() {
 
 }
 
+void printScoreToUart()
+{
+	const int BUFFER_SIZE = 100;
+	char buffer[BUFFER_SIZE];
+
+	int scores[MAX_SCORES];
+	int num_scores = loadScoresFromMemory(scores);
+
+	int chars_written = sprintf(buffer, "Number of Scores: %d\n", num_scores);
+	for(int i = 0; i < num_scores; i++)
+	{
+		// Should flush buffer if mostly full
+		if(chars_written >= BUFFER_SIZE - BUFFER_SIZE / 5)
+		{
+			chars_written = 0;
+			transmitToUart(buffer);
+		}
+
+		chars_written += sprintf(buffer + chars_written, "Score %d: %d\n", i + 1, scores[i]);
+	}
+
+	if(chars_written > 0)
+	{
+		transmitToUart(buffer);
+	}
+}
+
 void transmitToUart(char * buffer) {
 	for(int i = 0; i < UART_RETRIES; i++) {
 		if(HAL_OK == HAL_UART_Transmit(&huart1, buffer, strlen(buffer) + 1, UART_TIMEOUT_MS)) {
@@ -743,7 +812,63 @@ void transmitToUart(char * buffer) {
 		}
 	}
 }
-/* USER CODE END 4 */
+
+int loadScoresFromMemory(int * scores_to_load)
+{
+	int num_scores = 0;
+	// Read number of scores from memory
+	if (BSP_QSPI_Read(&num_scores, SCORE_BLOCK * FLASH_BLOCK_SIZE, sizeof(num_scores)) != QSPI_OK) {
+		Error_Handler();
+	}
+	int i = SCORE_BLOCK;
+
+	if(num_scores > 0)
+	{
+		if (BSP_QSPI_Read(scores_to_load, SCORE_BLOCK * FLASH_BLOCK_SIZE + sizeof(num_scores), num_scores*sizeof(int)) != QSPI_OK) {
+			Error_Handler();
+		}
+	}
+	return num_scores;
+}
+
+void storeScoreInMemory(const int score)
+{
+	int scores[MAX_SCORES];
+	int num_scores = loadScoresFromMemory(scores);
+
+	// Must clear before rewrite
+	clearScoresInMemory();
+
+	// Allocate space for number of scores, previous scores, and new score to store
+	int new_scores[MAX_SCORES + 2];
+	new_scores[0] = num_scores + 1;
+	memcpy(&new_scores[1], scores, num_scores*sizeof(int));
+	new_scores[num_scores + 1] = score;
+
+	// Write Scores to Memory
+	if (BSP_QSPI_Write(new_scores, SCORE_BLOCK * FLASH_BLOCK_SIZE, (1 + num_scores + 1)*sizeof(int)) != QSPI_OK) {
+		Error_Handler();
+	}
+}
+
+/// Clears all scores in Flash Memory
+void clearScoresInMemory()
+{
+	if (BSP_QSPI_Erase_Block(FLASH_BLOCK_SIZE*SCORE_BLOCK) != QSPI_OK) {
+		Error_Handler();
+	}
+}
+
+void formatScoreMemory()
+{
+	clearScoresInMemory();
+
+	// Must set initial number of scores to 0 (since clearing writes all 1s)
+	int num_score = 0;
+	if (BSP_QSPI_Write(&num_score, SCORE_BLOCK * FLASH_BLOCK_SIZE, sizeof(int)) != QSPI_OK) {
+			Error_Handler();
+	}
+}
 
 /**
   * @brief  Period elapsed callback in non blocking mode
@@ -772,6 +897,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   */
 void Error_Handler(void)
 {
+//	__BKPT();
   /* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 
