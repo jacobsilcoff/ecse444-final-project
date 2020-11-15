@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "arm_math.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
@@ -93,7 +94,7 @@ enum GAME_STATE {
 	START_GAME
 };
 
-enum GAME_STATE gameState = READY_TO_PLAY_TONE;
+enum GAME_STATE gameState = START_GAME;
 
 //Other constants --------------------------------------------
 const int UART_TIMEOUT_MS = 100;
@@ -167,6 +168,7 @@ int main(void)
     HAL_UART_Init(&huart1);
 	HAL_TIM_Base_Start(&htim2);
 	BSP_QSPI_Init();
+	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
 	//erase flash:
 	int numBlocks = (int)(NUM_TONES*sizeof(currentTone)/64000.0 + 1);
 	for (int i = 0; i < numBlocks; i++) {
@@ -182,7 +184,8 @@ int main(void)
 		for (int j = 0; j < TONE_LEN; j++) {
 			float theta = w * j/OUTPUT_SAMPLE_RATE;
 			float s = (1 + arm_sin_f32(theta)) / 2.0;
-			currentTone[j] = (uint32_t) (2/3.0 * MAX_TONE_AMPLITUDE * s);
+			//should reduce by some amount?
+			currentTone[j] = (uint32_t) (0.9 * MAX_TONE_AMPLITUDE * s);
 		}
 		//write tone to flash
 		if (BSP_QSPI_Write(currentTone, i * sizeof(currentTone), sizeof(currentTone)) != QSPI_OK) {
@@ -586,15 +589,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	}
 	if (gameState == READY_TO_PLAY_TONE || gameState == START_GAME) {
 		if (gameState == START_GAME) {
-			HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
-			transmitToUart("STARTING NEW GAME");
+			HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
+			transmitToUart("STARTING NEW GAME\n");
 		}
 		addToneToSequence();
 		playSequence();
 	} else if (gameState == READY_TO_RECORD) {
 		startRecording();
 	}
-
 }
 
 void addToneToSequence(void) {
@@ -612,10 +614,24 @@ void loadToneFromFlash(int frequency) {
 	}
 }
 
+void printSequence() {
+	transmitToUart("Sequence: \n");
+	for (int i = 0; i < toneSequenceSize; i++) {
+		char buf[20];
+		if (i != toneSequenceSize - 1) {
+			sprintf(buf, "%d, ", toneSequence[i]);
+		} else {
+			sprintf(buf, "%d\n", toneSequence[i]);
+		}
+		transmitToUart(buf);
+	}
+}
+
 /*
  * non-blocking function that plays the sequence to the user
  */
 void playSequence() {
+	printSequence();
 	gameState = PLAYING_TONE;
 	toneIndex = 0;
 	loadToneFromFlash(toneSequence[toneIndex]);
@@ -630,6 +646,7 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 	//toggles LED to help time
 	HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
 	HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
+	toneIndex++;
 	if (toneIndex >= toneSequenceSize) {
 		//Turn off LED when done playing
 		HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
@@ -637,7 +654,6 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 		gameState = READY_TO_RECORD;
 		return;
 	}
-	toneIndex++;
 	loadToneFromFlash(toneSequence[toneIndex]);
 	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
 }
@@ -650,7 +666,7 @@ void startRecording() {
 }
 
 void lose() {
-	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
 	transmitToUart("GAME OVER");
 	gameState = START_GAME;
 	toneSequenceSize = 0;
@@ -690,7 +706,7 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 
 int analyzeNote(int noteIndex) {
 	//Load note from flash
-	if (BSP_QSPI_Read(currentTone, sizeof(currentTone)*NUM_TONES + toneIndex * TONE_LEN, sizeof(currentTone)) != QSPI_OK) {
+	if (BSP_QSPI_Read(currentTone, sizeof(currentTone)*NUM_TONES + noteIndex * TONE_LEN, sizeof(currentTone)) != QSPI_OK) {
 		Error_Handler();
 	}
 
@@ -733,9 +749,18 @@ char checkAnswer() {
                maxValues[i] = 0;
                minValues[i] = INT_MAX;
        }
+       transmitToUart("User Inputed Frequencies: \n");
        for (int i = 0; i < toneSequenceSize; i++) {
                int tone = toneSequence[i];
                int freq = analyzeNote(i);
+
+               char buf[20];
+               if (i != toneSequenceSize - 1)
+            	   sprintf(buf, "%d, ", freq);
+               else
+            	   sprintf(buf, "%d\n", freq);
+               transmitToUart(buf);
+
                if (freq > maxValues[tone]) {
                        maxValues[tone] = freq;
                }
@@ -744,7 +769,6 @@ char checkAnswer() {
                }
                includedTones |= 1 << tone;
        }
-
        //Checks tone ranges are reasonable
        for (int i = 0; i < NUM_TONES; i++) {
                //Don't need to compare tones not involved in sequence
