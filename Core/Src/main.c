@@ -68,11 +68,7 @@ const float TAU = 6.2831853072;
 const int TONE_FREQUENCIES[] = {524, 659, 784, 1047};
 const int BLOCK_SIZE = 65536;
 int REC_START;
-//const int TONE_FREQUENCIES[] = {1047, 1319, 1568, 2093};
-//const int TONE_FREQUENCIES[] = {2093, 2637, 3136, 4186};
 const int NUM_TONES = 4;
-//const int TONE_LEN = 22500;
-//uint32_t currentTone[22500];
 const int TONE_LEN = 8192;
 uint32_t currentTone[8192];
 
@@ -88,6 +84,10 @@ uint32_t fftOutputBuffer[8192];
 const int WINDOW_SIZE = 50;
 const int MIN_FREQ = 150;
 const int MAX_FREQ = 3000;
+
+//Constants & Variables for High Scores
+int HIGH_SCORE_START;
+const int MAX_SCORES = 1000;
 
 //Flags for state --------------------------------------------
 enum GAME_STATE {
@@ -117,16 +117,60 @@ static void MX_DAC1_Init(void);
 static void MX_QUADSPI_Init(void);
 static void MX_DFSDM1_Init(void);
 /* USER CODE BEGIN PFP */
-void addToneToSequence(void);
-void playSequence(void);
-void playSequenceBlocking(void);
-void loadToneFromFlash(int frequency);
+
+/// Adds an additional tone to the sequence to be played and expected from user
+void addToneToSequence();
+
+/// Starts audio output of tone sequence
+void playSequence();
+
+/// Get tone from flash of specified frequency index to currentTone buffer
+///
+/// @param frequency_index Index of frequency to retrieve from QSPI flash memory
+void loadToneFromFlash(int frequency_index);
+
+/// Starts microphone recording DMA
 void startRecording();
+
+/// Determine frequency of specific note
+///
+/// @param noteIndex Index of the note that frequency should be analyzed of
+/// @return Frequency of user tone
 int analyzeNote(int noteIndex);
-char checkAnswer();
-void transmitToUart(char * buffer);
-void lose(void);
-/* USER CODE END PFP */
+
+/// Checks that the user tone sequence is correct
+///
+/// @return 0 if answer false, any other uint8_t if true
+uint8_t checkAnswer();
+
+/// Prints score and restarts game loop
+void lose();
+
+/// Transmits all scores through UART
+ void printScoreToUart();
+
+ /// Transmits message to UART to be displayed on screen of connected device
+ ///
+ /// @param buffer Pointer to null-terminated string to be sent through UART
+ void transmitToUart(char * buffer);
+
+ /// Loads scores from Flash Memory
+ ///
+ /// @param scores Pointer to where to copy scores
+ /// @return Integer representing number of scores stored in Flash
+ int loadScoresFromMemory(int * scores);
+
+ /// Stores score in Flash Memory
+ ///
+ /// @param score Score to store in memory
+ void storeScoreInMemory(const int score);
+
+ /// Formats the Flash Memory for store
+ /// Note: Should only use to reset system
+ void formatScoreMemory();
+
+ /// Clears all scores in Flash Memory
+ void clearScoresInMemory();/* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
@@ -173,23 +217,29 @@ int main(void)
 	HAL_TIM_Base_Start(&htim2);
 	BSP_QSPI_Init();
 	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
-	//erase flash:
+
+	//erase flash
 	int numBlocks = (int)(NUM_TONES*sizeof(currentTone)/(float)BLOCK_SIZE + 1);
 	for (int i = 0; i < numBlocks; i++) {
 		if (BSP_QSPI_Erase_Block(BLOCK_SIZE*i) != QSPI_OK) {
 			Error_Handler();
 		}
 	}
-	REC_START = BLOCK_SIZE * (numBlocks + 1);
 
-	//program flash:
+	REC_START = BLOCK_SIZE * (numBlocks + 1);
+	HIGH_SCORE_START = REC_START + BLOCK_SIZE * (numBlocks + 1);
+
+	//format high score memory
+	//formatScoreMemory();
+
+	//program flash
 	for (int i = NUM_TONES-1; i >= 0; i--) {
 		//calculate a single tone
 		float w = TAU * TONE_FREQUENCIES[i];
 		for (int j = 0; j < TONE_LEN; j++) {
 			float theta = w * j/OUTPUT_SAMPLE_RATE;
 			float s = (1 + arm_sin_f32(theta)) / 2.0;
-			//should reduce by some amount?
+
 			currentTone[j] = (uint32_t) (0.9 * MAX_TONE_AMPLITUDE * s);
 		}
 		//write tone to flash
@@ -636,18 +686,22 @@ void printSequence() {
  * non-blocking function that plays the sequence to the user
  */
 void playSequence() {
-	printSequence();
 	gameState = PLAYING_TONE;
 	int numBlocks = (int)(toneSequenceSize*sizeof(currentTone)/(float)BLOCK_SIZE  + 1);
+
+	// Erase all user recordings in flash
 	for (int i = 0; i < numBlocks; i++) {
 		if (BSP_QSPI_Erase_Block(REC_START + BLOCK_SIZE*i) != QSPI_OK) {
 			Error_Handler();
 		}
 	}
+
+	// Get tons from flash and start DMA
 	toneIndex = 0;
 	loadToneFromFlash(toneSequence[toneIndex]);
 	HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
 	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
+
 	//Turn on LED to start
 	HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET);
 }
@@ -657,21 +711,23 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 	//toggles LED to help time
 	HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
 	HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
+
 	toneIndex++;
 	if (toneIndex >= toneSequenceSize) {
 		//Turn off LED when done playing
 		HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
-		toneIndex = 0;
 		gameState = READY_TO_RECORD;
-		return;
+	} else {
+		loadToneFromFlash(toneSequence[toneIndex]);
+		HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
 	}
-	loadToneFromFlash(toneSequence[toneIndex]);
-	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, currentTone, TONE_LEN, DAC_ALIGN_8B_R);
 }
 
 void startRecording() {
+	toneIndex = 0;
 	gameState = RECORDING;
 	HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
+
 	//Turn on LED to start
 	HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET);
 }
@@ -682,6 +738,10 @@ void lose() {
 	char buf[50];
 	sprintf(buf, "Your score: %d points.\n\n", toneSequenceSize);
 	transmitToUart(buf);
+
+	storeScoreInMemory(toneSequenceSize);
+	printScoreToUart();
+
 	gameState = START_GAME;
 	toneSequenceSize = 0;
 	toneIndex = 0;
@@ -703,12 +763,12 @@ void HAL_DFSDM_FilterRegConvCpltCallback (DFSDM_Filter_HandleTypeDef * hdfsdm_fi
 			Error_Handler();
 		}
 
+		//check if end of user recording
 		if(++toneIndex < toneSequenceSize) {
 			HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
 			HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, currentTone, TONE_LEN);
 		} else {
-			char won = checkAnswer();
-			if (won) {
+			if (checkAnswer()) {
 				gameState = READY_TO_PLAY_TONE;
 			} else {
 				lose();
@@ -732,7 +792,7 @@ int analyzeNote(int noteIndex) {
 	//Call FFT (assumes currentTone buffer already formatted in q31 format)
 	arm_rfft_q31(&fftInstance, &currentTone[TONE_LEN/4], fftOutputBuffer);
 
-	//Find max values
+	//Find magnitude values
 	arm_cmplx_mag_q31(fftOutputBuffer, currentTone, TONE_LEN/2);
 
 	const float DELTA_F = OUTPUT_SAMPLE_RATE / (TONE_LEN / 2);
@@ -755,47 +815,139 @@ int analyzeNote(int noteIndex) {
 	return maxCenterFreq;
 }
 
-char checkAnswer() {
+uint8_t checkAnswer() {
        int maxValues[NUM_TONES];
        int minValues[NUM_TONES];
-       char includedTones = 0x0;
+       uint8_t includedTones = 0x0;
        for (int i = 0; i < NUM_TONES; i++) {
-               maxValues[i] = 0;
-               minValues[i] = INT_MAX;
+		   maxValues[i] = 0;
+		   minValues[i] = INT_MAX;
        }
+
+       printSequence();
+
        transmitToUart("User Inputed Frequencies: \n");
+
        for (int i = 0; i < toneSequenceSize; i++) {
-               int tone = toneSequence[i];
-               int freq = analyzeNote(i);
+		   int tone = toneSequence[i];
+		   int freq = analyzeNote(i);
 
-               char buf[20];
-               if (i != toneSequenceSize - 1)
-            	   sprintf(buf, "%d, ", freq);
-               else
-            	   sprintf(buf, "%d\n", freq);
-               transmitToUart(buf);
+		   char buf[20];
+		   if (i != toneSequenceSize - 1) {
+			   sprintf(buf, "%d, ", freq);
+		   } else {
+			   sprintf(buf, "%d\n", freq);
+		   }
+		   transmitToUart(buf);
 
-               if (freq > maxValues[tone]) {
-                       maxValues[tone] = freq;
-               }
-               if (freq < minValues[tone]) {
-                       minValues[tone] = freq;
-               }
-               includedTones |= 1 << tone;
+		   if (freq > maxValues[tone]) {
+			   maxValues[tone] = freq;
+		   }
+		   if (freq < minValues[tone]) {
+			   minValues[tone] = freq;
+		   }
+
+		   // create bit field for whether tone used
+		   includedTones |= 1 << tone;
        }
        //Checks tone ranges are reasonable
        for (int i = 0; i < NUM_TONES; i++) {
-               //Don't need to compare tones not involved in sequence
-               if (!(includedTones & (1 << i))) continue;
-               for (int j = i + 1; j < NUM_TONES; j++) {
-                       if ((includedTones & (1 << j)) && maxValues[i] > minValues[j]) {
-                               return 0; // failure :(
-                       }
-               }
+		   //Don't need to compare tones not involved in sequence
+		   if (includedTones & (1 << i))
+		   {
+			   for (int j = i + 1; j < NUM_TONES; j++) {
+				   if ((includedTones & (1 << j)) && maxValues[i] > minValues[j]) {
+					   return 0; // failure :(
+				   }
+			   }
+		   }
        }
        return 1; // success :)
-
 }
+
+void printScoreToUart()
+ {
+ 	const int BUFFER_SIZE = 100;
+ 	char buffer[BUFFER_SIZE];
+
+ 	int scores[MAX_SCORES];
+ 	int num_scores = loadScoresFromMemory(scores);
+
+ 	int chars_written = sprintf(buffer, "Number of Scores: %d\n", num_scores);
+ 	for(int i = 0; i < num_scores; i++)
+ 	{
+ 		// Should flush buffer if mostly full
+ 		if(chars_written >= BUFFER_SIZE - BUFFER_SIZE / 5)
+ 		{
+ 			chars_written = 0;
+ 			transmitToUart(buffer);
+ 		}
+
+ 		chars_written += sprintf(buffer + chars_written, "Score %d: %d\n", i + 1, scores[i]);
+ 	}
+
+ 	if(chars_written > 0)
+ 	{
+ 		transmitToUart(buffer);
+ 	}
+ }
+
+int loadScoresFromMemory(int * scores_to_load)
+ {
+	int num_scores = 0;
+	// Read number of scores from memory
+	if (BSP_QSPI_Read(&num_scores, HIGH_SCORE_START, sizeof(num_scores)) != QSPI_OK) {
+		Error_Handler();
+	}
+
+	if(num_scores > 0)
+	{
+		if (BSP_QSPI_Read(scores_to_load, HIGH_SCORE_START + sizeof(num_scores), num_scores*sizeof(int)) != QSPI_OK) {
+			Error_Handler();
+		}
+	}
+	return num_scores;
+ }
+
+ void storeScoreInMemory(const int score)
+ {
+	int scores[MAX_SCORES];
+	int num_scores = loadScoresFromMemory(scores);
+
+	// Must clear before rewrite
+	clearScoresInMemory();
+
+	// Allocate space for number of scores, previous scores, and new score to store
+	int new_scores[MAX_SCORES + 2];
+	new_scores[0] = num_scores + 1;
+	memcpy(&new_scores[1], scores, num_scores*sizeof(int));
+	new_scores[num_scores + 1] = score;
+
+	// Write Scores to Memory
+	if (BSP_QSPI_Write(new_scores, HIGH_SCORE_START, (1 + num_scores + 1)*sizeof(int)) != QSPI_OK) {
+		Error_Handler();
+	}
+ }
+
+ /// Clears all scores in Flash Memory
+ void clearScoresInMemory()
+ {
+	if (BSP_QSPI_Erase_Block(HIGH_SCORE_START) != QSPI_OK) {
+		Error_Handler();
+	}
+ }
+
+ void formatScoreMemory()
+ {
+	clearScoresInMemory();
+
+	// Must set initial number of scores to 0 (since clearing writes all 1s)
+	int num_score = 0;
+	if (BSP_QSPI_Write(&num_score, HIGH_SCORE_START, sizeof(int)) != QSPI_OK) {
+			Error_Handler();
+	}
+ }
+
 
 void transmitToUart(char * buffer) {
 	for(int i = 0; i < UART_RETRIES; i++) {
