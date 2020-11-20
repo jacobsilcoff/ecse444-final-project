@@ -865,8 +865,7 @@ uint8_t checkAnswer() {
        return 1; // success :)
 }
 
-void printScoreToUart()
- {
+void printScoreToUart() {
  	const int BUFFER_SIZE = 100;
  	char buffer[BUFFER_SIZE];
 
@@ -874,11 +873,9 @@ void printScoreToUart()
  	int num_scores = loadScoresFromMemory(scores);
 
  	int chars_written = sprintf(buffer, "Number of Scores: %d\n", num_scores);
- 	for(int i = 0; i < num_scores; i++)
- 	{
+ 	for(int i = 0; i < num_scores; i++) {
  		// Should flush buffer if mostly full
- 		if(chars_written >= BUFFER_SIZE - BUFFER_SIZE / 5)
- 		{
+ 		if(chars_written >= BUFFER_SIZE - BUFFER_SIZE / 5) {
  			chars_written = 0;
  			transmitToUart(buffer);
  		}
@@ -886,22 +883,19 @@ void printScoreToUart()
  		chars_written += sprintf(buffer + chars_written, "Score %d: %d\n", i + 1, scores[i]);
  	}
 
- 	if(chars_written > 0)
- 	{
+ 	if(chars_written > 0) {
  		transmitToUart(buffer);
  	}
  }
 
-int loadScoresFromMemory(int * scores_to_load)
- {
+int loadScoresFromMemory(int * scores_to_load) {
 	int num_scores = 0;
 	// Read number of scores from memory
 	if (BSP_QSPI_Read(&num_scores, HIGH_SCORE_START, sizeof(num_scores)) != QSPI_OK) {
 		Error_Handler();
 	}
 
-	if(num_scores > 0)
-	{
+	if(num_scores > 0) {
 		if (BSP_QSPI_Read(scores_to_load, HIGH_SCORE_START + sizeof(num_scores), num_scores*sizeof(int)) != QSPI_OK) {
 			Error_Handler();
 		}
@@ -909,8 +903,7 @@ int loadScoresFromMemory(int * scores_to_load)
 	return num_scores;
  }
 
- void storeScoreInMemory(const int score)
- {
+ void storeScoreInMemory(const int score) {
 	int scores[MAX_SCORES];
 	int num_scores = loadScoresFromMemory(scores);
 
@@ -930,15 +923,13 @@ int loadScoresFromMemory(int * scores_to_load)
  }
 
  /// Clears all scores in Flash Memory
- void clearScoresInMemory()
- {
+ void clearScoresInMemory() {
 	if (BSP_QSPI_Erase_Block(HIGH_SCORE_START) != QSPI_OK) {
 		Error_Handler();
 	}
  }
 
- void formatScoreMemory()
- {
+ void formatScoreMemory()  {
 	clearScoresInMemory();
 
 	// Must set initial number of scores to 0 (since clearing writes all 1s)
