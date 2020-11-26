@@ -88,6 +88,7 @@ const int MAX_FREQ = 3000;
 //Constants & Variables for High Scores
 int HIGH_SCORE_START;
 const int MAX_SCORES = 1000;
+const int FORMAT_START = 0xA0FA0FEE;
 
 //Flags for state --------------------------------------------
 enum GAME_STATE {
@@ -154,6 +155,13 @@ void lose();
  /// @param buffer Pointer to null-terminated string to be sent through UART
  void transmitToUart(char * buffer);
 
+ // Receives message from UART
+ //
+ // @param buffer Pointer to memory to write to
+ // @param size Number of bytes to read
+ // @return Bytes read if successful, -1 otherwise
+ int receiveFromUart(char * buffer, uint16_t size);
+
  /// Loads scores from Flash Memory
  ///
  /// @param scores Pointer to where to copy scores
@@ -162,8 +170,9 @@ void lose();
 
  /// Stores score in Flash Memory
  ///
+ /// @param initials Character buffer with 2 characters
  /// @param score Score to store in memory
- void storeScoreInMemory(const int score);
+ void storeScoreInMemory(char * initials, int score);
 
  /// Formats the Flash Memory for store
  /// Note: Should only use to reset system
@@ -218,7 +227,7 @@ int main(void)
 	BSP_QSPI_Init();
 	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
 
-	//erase flash
+	//erase flash except high scores
 	int numBlocks = (int)(NUM_TONES*sizeof(currentTone)/(float)BLOCK_SIZE + 1);
 	for (int i = 0; i < numBlocks; i++) {
 		if (BSP_QSPI_Erase_Block(BLOCK_SIZE*i) != QSPI_OK) {
@@ -229,8 +238,17 @@ int main(void)
 	REC_START = BLOCK_SIZE * (numBlocks + 1);
 	HIGH_SCORE_START = REC_START + BLOCK_SIZE * (numBlocks + 1);
 
-	//format high score memory
-	//formatScoreMemory();
+	//format high score memory if necessary
+	int check_format = 0;
+	if (BSP_QSPI_Read(&check_format, HIGH_SCORE_START, sizeof(check_format)) != QSPI_OK) {
+		Error_Handler();
+	}
+
+	// if constant start byte not there, we know we must format
+	if(check_format != FORMAT_START)
+	{
+		formatScoreMemory();
+	}
 
 	//program flash
 	for (int i = NUM_TONES-1; i >= 0; i--) {
@@ -552,7 +570,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 9600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -645,7 +663,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (gameState == READY_TO_PLAY_TONE || gameState == START_GAME) {
 		if (gameState == START_GAME) {
 			HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
-			transmitToUart("STARTING NEW GAME\n");
+			transmitToUart("#");
+			transmitToUart("Starting new game!\n");
 		}
 		addToneToSequence();
 		playSequence();
@@ -670,13 +689,14 @@ void loadToneFromFlash(int frequency) {
 }
 
 void printSequence() {
-	transmitToUart("Sequence: \n");
+	transmitToUart("Expected Sequence - \n");
 	for (int i = 0; i < toneSequenceSize; i++) {
 		char buf[20];
+		memset(buf, 0, sizeof(buf));
 		if (i != toneSequenceSize - 1) {
-			sprintf(buf, "%d, ", toneSequence[i]);
+			sprintf(buf, "%d, ", TONE_FREQUENCIES[toneSequence[i]]);
 		} else {
-			sprintf(buf, "%d\n", toneSequence[i]);
+			sprintf(buf, "%d\n", TONE_FREQUENCIES[toneSequence[i]]);
 		}
 		transmitToUart(buf);
 	}
@@ -734,12 +754,19 @@ void startRecording() {
 
 void lose() {
 	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
-	transmitToUart("GAME OVER\n");
+	transmitToUart("Game Over\n");
 	char buf[50];
-	sprintf(buf, "Your score: %d points.\n\n", toneSequenceSize);
+	memset(buf, 0, sizeof(buf));
+	sprintf(buf, "Your score is %d points.\n\n", toneSequenceSize);
 	transmitToUart(buf);
 
-	storeScoreInMemory(toneSequenceSize);
+	transmitToUart("Enter Initials:\n");
+
+	//Ensure all characters transmitted
+	char initials[2];
+	receiveFromUart(initials, sizeof(initials));
+
+	storeScoreInMemory(initials, toneSequenceSize);
 	printScoreToUart();
 
 	gameState = START_GAME;
@@ -826,13 +853,14 @@ uint8_t checkAnswer() {
 
        printSequence();
 
-       transmitToUart("User Inputed Frequencies: \n");
+       transmitToUart("User Inputed Frequencies - \n");
 
        for (int i = 0; i < toneSequenceSize; i++) {
 		   int tone = toneSequence[i];
 		   int freq = analyzeNote(i);
 
 		   char buf[20];
+		   memset(buf, 0, sizeof(buf));
 		   if (i != toneSequenceSize - 1) {
 			   sprintf(buf, "%d, ", freq);
 		   } else {
@@ -868,19 +896,24 @@ uint8_t checkAnswer() {
 void printScoreToUart() {
  	const int BUFFER_SIZE = 100;
  	char buffer[BUFFER_SIZE];
+ 	memset(buffer, 0, BUFFER_SIZE);
 
  	int scores[MAX_SCORES];
  	int num_scores = loadScoresFromMemory(scores);
 
- 	int chars_written = sprintf(buffer, "Number of Scores: %d\n", num_scores);
+ 	int chars_written = sprintf(buffer, "---Leaderboard---\n");
  	for(int i = 0; i < num_scores; i++) {
  		// Should flush buffer if mostly full
  		if(chars_written >= BUFFER_SIZE - BUFFER_SIZE / 5) {
  			chars_written = 0;
  			transmitToUart(buffer);
  		}
-
- 		chars_written += sprintf(buffer + chars_written, "Score %d: %d\n", i + 1, scores[i]);
+ 		int raw_score = scores[i] & 0xFFFF; // Last 16 bits are actual score
+ 		char initials[3];
+ 		initials[0] = (scores[i] >> 3*8) & 0xFF;
+ 		initials[1] = (scores[i] >> 2*8) & 0xFF;
+ 		initials[2] = '\0';
+ 		chars_written += sprintf(buffer + chars_written, "%d. %s - %d\n", i + 1, initials, raw_score);
  	}
 
  	if(chars_written > 0) {
@@ -891,19 +924,19 @@ void printScoreToUart() {
 int loadScoresFromMemory(int * scores_to_load) {
 	int num_scores = 0;
 	// Read number of scores from memory
-	if (BSP_QSPI_Read(&num_scores, HIGH_SCORE_START, sizeof(num_scores)) != QSPI_OK) {
+	if (BSP_QSPI_Read(&num_scores, HIGH_SCORE_START + sizeof(FORMAT_START), sizeof(num_scores)) != QSPI_OK) {
 		Error_Handler();
 	}
 
 	if(num_scores > 0) {
-		if (BSP_QSPI_Read(scores_to_load, HIGH_SCORE_START + sizeof(num_scores), num_scores*sizeof(int)) != QSPI_OK) {
+		if (BSP_QSPI_Read(scores_to_load, HIGH_SCORE_START + sizeof(FORMAT_START) + sizeof(num_scores), num_scores*sizeof(int)) != QSPI_OK) {
 			Error_Handler();
 		}
 	}
 	return num_scores;
  }
 
- void storeScoreInMemory(const int score) {
+ void storeScoreInMemory(char * initials, int score) {
 	int scores[MAX_SCORES];
 	int num_scores = loadScoresFromMemory(scores);
 
@@ -911,13 +944,41 @@ int loadScoresFromMemory(int * scores_to_load) {
 	clearScoresInMemory();
 
 	// Allocate space for number of scores, previous scores, and new score to store
-	int new_scores[MAX_SCORES + 2];
-	new_scores[0] = num_scores + 1;
-	memcpy(&new_scores[1], scores, num_scores*sizeof(int));
-	new_scores[num_scores + 1] = score;
+	int new_scores[MAX_SCORES + 3];
+	new_scores[0] = FORMAT_START;
+	new_scores[1] = num_scores + 1;
+
+	score |= initials[0] << 3*8; // Add initials to score
+	score |= initials[1] << 2*8;
+
+	int new_score_added = 0;
+
+	// Add element sorted
+	for(int i = 0; i < num_scores; i++) {
+		if(new_score_added == 0 && (score & 0xFFFF) >= (scores[i] & 0xFFFF))
+		{
+			new_scores[i+2] = score;
+			new_score_added = 1;
+			i--;
+		}
+		else if(new_score_added == 1)
+		{
+			new_scores[i+3] = scores[i];
+		}
+		else
+		{
+			new_scores[i+2] = scores[i];
+		}
+	}
+
+	if(new_score_added == 0) {
+		new_scores[num_scores + 2] = score;
+	}
+
+
 
 	// Write Scores to Memory
-	if (BSP_QSPI_Write(new_scores, HIGH_SCORE_START, (1 + num_scores + 1)*sizeof(int)) != QSPI_OK) {
+	if (BSP_QSPI_Write(new_scores, HIGH_SCORE_START, (2 + num_scores + 1)*sizeof(int)) != QSPI_OK) {
 		Error_Handler();
 	}
  }
@@ -934,7 +995,8 @@ int loadScoresFromMemory(int * scores_to_load) {
 
 	// Must set initial number of scores to 0 (since clearing writes all 1s)
 	int num_score = 0;
-	if (BSP_QSPI_Write(&num_score, HIGH_SCORE_START, sizeof(int)) != QSPI_OK) {
+	if (BSP_QSPI_Write(&FORMAT_START, HIGH_SCORE_START, sizeof(int)) != QSPI_OK ||
+		BSP_QSPI_Write(&num_score, HIGH_SCORE_START + sizeof(int), sizeof(int)) != QSPI_OK) {
 			Error_Handler();
 	}
  }
@@ -946,6 +1008,23 @@ void transmitToUart(char * buffer) {
 			break;
 		}
 	}
+}
+
+int receiveFromUart(char * buffer, uint16_t size) {
+	for(int i = 0; i < UART_RETRIES; i++) {
+		while(1) {
+
+			int hal_status = HAL_UART_Receive(&huart1, buffer, size, UART_TIMEOUT_MS);
+			if (hal_status == HAL_OK) {
+				return size;
+			} else if (hal_status == HAL_TIMEOUT) {
+				// Do nothing, wait for input
+			} else {
+				break; // Reset for another retry
+			}
+		}
+	}
+	return -1;
 }
 /* USER CODE END 4 */
 
