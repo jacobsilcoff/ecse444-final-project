@@ -25,20 +25,36 @@ int main(int argc, char * argv[]) {
         return -1;
     }
 
-    std::cout << "Welcome to the Simon Audio Memory Game\n\n"
-              << "Instructions:\n"
-              << "\tPress user button to begin game.\n"
-              << "\tA tone will play from the speaker.\n"
-              << "\tAfter the sequence of tones stops,\n"
-              << "\tclick the button and whistle back\n"
-              << "\tthe sequence into the microphone.\n\n"
-              << "\tWith every level, the number of tones\n"
-              << "\tplayed will increase. The light will flash\n"
-              << "\tto help keep track of when the tone should be changed.\n\n"
-              << "\tContinue playing until the red light flashes.\n"
-              << "\tThe user will be prompted to enter their first two\n"
-              << "\tinitials to save the score to the high scores list.\n"
+    std::cout << "\n"
+              << "\n"
+              << "\n"
+              << "   ______________________________SIMON MEMORY GAME_\n"
+              << "                                                    \n"
+              << "   ___________________ECSE 444_____________________ \n"
+              << "\n"
+              << "   _INSTRUCTIONS:__________________________________\n"
+              << "\n"
+              << "  A sequence of notes will be played out of the DAC\n"
+              << "  speaker. The 1st sequence played is just composed\n"
+              << "  of 1 note. Score a point for correctly whistling \n"
+              << "  back the sequence to the microphone. A good guess\n"
+              << "  adds another note to the sequence. A wrong guess \n"
+              << "  leads to .. GAME OVER .. Best of luck!\n"
+              << "\n"
+              /*
+                    << "_________________________________________________\n"
+                    << "/   /   /   /   /   /   /   /   /   /   /   /   /\n"
+                    << "_______Press the Blue Button to Start Game_______\n"
+                    << "  /   /   /   /   /   /   /   /   /   /   /   /  \n"
+                    << "_________________________________________________\n"
+                */
+              << "           ________________________________       \n"
+              << "          |                                |      \n"
+              << "          |   Press Blue Button to Start   |      \n"
+              << "          |________________________________|      \n"
+              << "\n"
               << std::endl;
+
 
     // Close file when user exits client
     signal(SIGINT, signalHandler);

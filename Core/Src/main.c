@@ -181,9 +181,6 @@ void lose();
  /// Clears all scores in Flash Memory
  void clearScoresInMemory();
 
- /// Displays the Intro and Instructions on the UART
- void displayGameIntro();
-
  /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -270,9 +267,6 @@ int main(void)
 			Error_Handler();
 		}
 	}
-
-	// display game introduction and instructions
-	displayGameIntro();
 
   /* USER CODE END 2 */
 
@@ -699,7 +693,7 @@ void loadToneFromFlash(int frequency) {
 
 void printSequence() {
 
-	transmitToUart("   Expected Sequence: - ");
+	transmitToUart("   Expected Sequence - ");
 	for (int i = 0; i < toneSequenceSize; i++) {
 		char buf[20];
 		memset(buf, 0, sizeof(buf));
@@ -771,7 +765,7 @@ void lose() {
 	transmitToUart("\n");
 	char buf[50];
 	memset(buf, 0, sizeof(buf));
-	sprintf(buf, "   __Your Score: %d Points\n", toneSequenceSize);
+	sprintf(buf, "   __Your Score is %d Points\n", toneSequenceSize);
 	transmitToUart(buf);
 	transmitToUart("\n");
 	transmitToUart("   ___Enter Initials:\n");
@@ -867,7 +861,7 @@ uint8_t checkAnswer() {
 
        printSequence();
 
-       transmitToUart("   User Inputed Frequencies: - ");
+       transmitToUart("   User Inputed Frequencies - ");
 
        for (int i = 0; i < toneSequenceSize; i++) {
 		   int tone = toneSequence[i];
@@ -916,7 +910,7 @@ void printScoreToUart() {
  	int scores[MAX_SCORES];
  	int num_scores = loadScoresFromMemory(scores);
 
- 	int chars_written = sprintf(buffer, "   ________________ LEADERBOARD: __________________ \n");
+ 	int chars_written = sprintf(buffer, "   ________________ LEADERBOARD __________________ \n");
  	for(int i = 0; i < num_scores; i++) {
  		// Should flush buffer if mostly full
  		if(chars_written >= BUFFER_SIZE - BUFFER_SIZE / 5) {
@@ -1043,39 +1037,6 @@ int receiveFromUart(char * buffer, uint16_t size) {
 		}
 	}
 	return -1;
-}
-
-/// Displays the Intro and Instructions on the UART
-void displayGameIntro(){
-	transmitToUart("\n");
-		transmitToUart("\n");
-		transmitToUart("\n");
-		transmitToUart("   ______________________________SIMON MEMORY GAME_\n");
-		transmitToUart("                                                    \n");
-		transmitToUart("   ___________________ECSE 444_____________________ \n");
-		transmitToUart("\n");
-		transmitToUart("   _INSTRUCTIONS:__________________________________\n");
-		transmitToUart("\n");
-		transmitToUart("  A sequence of notes will be played out of the DAC\n");
-		transmitToUart("  speaker. The 1st sequence played is just composed\n");
-		transmitToUart("  of 1 note. Score a point for correctly whistling \n");
-		transmitToUart("  back the sequence to the microphone. A good guess\n");
-		transmitToUart("  adds another note to the sequence. A wrong guess \n");
-		transmitToUart("  leads to .. GAME OVER .. Best of luck!\n");
-		transmitToUart("\n");
-		/*
-		transmitToUart("_________________________________________________\n");
-		transmitToUart("/   /   /   /   /   /   /   /   /   /   /   /   /\n");
-		transmitToUart("_______Press the Blue Button to Start Game_______\n");
-		transmitToUart("  /   /   /   /   /   /   /   /   /   /   /   /  \n");
-		transmitToUart("_________________________________________________\n");
-		*/
-		transmitToUart("           ________________________________       \n");
-		transmitToUart("          |                                |      \n");
-		transmitToUart("          |   Press Blue Button to Start   |      \n");
-		transmitToUart("          |________________________________|      \n");
-		transmitToUart("\n");
-		transmitToUart("\n");
 }
 /* USER CODE END 4 */
 
