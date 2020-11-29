@@ -179,7 +179,9 @@ void lose();
  void formatScoreMemory();
 
  /// Clears all scores in Flash Memory
- void clearScoresInMemory();/* USER CODE END PFP */
+ void clearScoresInMemory();
+
+ /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
@@ -265,6 +267,7 @@ int main(void)
 			Error_Handler();
 		}
 	}
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -663,8 +666,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (gameState == READY_TO_PLAY_TONE || gameState == START_GAME) {
 		if (gameState == START_GAME) {
 			HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
-			transmitToUart("#");
-			transmitToUart("Starting new game!\n");
+			transmitToUart("   ______________ Starting New Game! ______________\n");
+			transmitToUart("\n");
 		}
 		addToneToSequence();
 		playSequence();
@@ -689,7 +692,8 @@ void loadToneFromFlash(int frequency) {
 }
 
 void printSequence() {
-	transmitToUart("Expected Sequence - \n");
+
+	transmitToUart("   Expected Sequence - ");
 	for (int i = 0; i < toneSequenceSize; i++) {
 		char buf[20];
 		memset(buf, 0, sizeof(buf));
@@ -698,8 +702,10 @@ void printSequence() {
 		} else {
 			sprintf(buf, "%d\n", TONE_FREQUENCIES[toneSequence[i]]);
 		}
+
 		transmitToUart(buf);
 	}
+
 }
 
 /*
@@ -754,13 +760,15 @@ void startRecording() {
 
 void lose() {
 	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
-	transmitToUart("Game Over\n");
+	transmitToUart("   _________________ GAME OVER! ___________________ \n");
+	transmitToUart("\n");
+	transmitToUart("\n");
 	char buf[50];
 	memset(buf, 0, sizeof(buf));
-	sprintf(buf, "Your score is %d points.\n\n", toneSequenceSize);
+	sprintf(buf, "   __Your Score is %d Points\n", toneSequenceSize);
 	transmitToUart(buf);
-
-	transmitToUart("Enter Initials:\n");
+	transmitToUart("\n");
+	transmitToUart("   ___Enter Initials:\n");
 
 	//Ensure all characters transmitted
 	char initials[2];
@@ -853,7 +861,7 @@ uint8_t checkAnswer() {
 
        printSequence();
 
-       transmitToUart("User Inputed Frequencies - \n");
+       transmitToUart("   User Inputed Frequencies - ");
 
        for (int i = 0; i < toneSequenceSize; i++) {
 		   int tone = toneSequence[i];
@@ -878,6 +886,7 @@ uint8_t checkAnswer() {
 		   // create bit field for whether tone used
 		   includedTones |= 1 << tone;
        }
+       transmitToUart("\n");
        //Checks tone ranges are reasonable
        for (int i = 0; i < NUM_TONES; i++) {
 		   //Don't need to compare tones not involved in sequence
@@ -901,7 +910,7 @@ void printScoreToUart() {
  	int scores[MAX_SCORES];
  	int num_scores = loadScoresFromMemory(scores);
 
- 	int chars_written = sprintf(buffer, "---Leaderboard---\n");
+ 	int chars_written = sprintf(buffer, "   ________________ LEADERBOARD __________________ \n");
  	for(int i = 0; i < num_scores; i++) {
  		// Should flush buffer if mostly full
  		if(chars_written >= BUFFER_SIZE - BUFFER_SIZE / 5) {
@@ -919,6 +928,9 @@ void printScoreToUart() {
  	if(chars_written > 0) {
  		transmitToUart(buffer);
  	}
+ 	transmitToUart("\n");
+ 	transmitToUart("\n");
+ 	transmitToUart("\n");
  }
 
 int loadScoresFromMemory(int * scores_to_load) {
